@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>Game</title>
+  <!-- 
+  css code:
+  -->
   <style>
     body {
       background: url('Pics/tetrisBg.png') no-repeat center center fixed;
@@ -71,6 +74,9 @@
     const WIDTH = 12;
     const HEIGHT = 20;
 
+    let totalLinesCleared = 0;
+    let totalPiecesDropped = 0;
+
     const canvas = document.getElementById('tetris');
     const context = canvas.getContext('2d');
     canvas.width = BLOCK_SIZE * WIDTH;
@@ -90,6 +96,53 @@
 
     let username = prompt("Enter your username:") || "Anonymous";
     const HISTORY_KEY = "tetris_scores";
+
+  // ===== Cloud Scoreboard: jsonbin.io =====
+  const JSONBIN_API_KEY = "$2a$10$kiRijwO40L5Xd/Hod9bsb.uBsUHxS/n1YRdHs5Fo2LLF0he3HCqxe";
+  const JSONBIN_BIN_ID = "692018e0d0ea881f40f639d2";
+
+  async function getScoresFromCloud() {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}/latest`, {
+      headers: { "X-Master-Key": JSONBIN_API_KEY }
+    });
+    const data = await res.json();
+    return data.record.scores || [];
+  }
+
+  async function saveScoresToCloud(scores) {
+    await fetch(`https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Master-Key": JSONBIN_API_KEY
+      },
+      body: JSON.stringify({ scores })
+    });
+  }
+
+  async function saveScoreCloud(username, score) {
+    let scores = await getScoresFromCloud();
+    scores.push({ username, score });
+    scores.sort((a, b) => b.score - a.score);
+    scores = scores.slice(0, 3);
+    await saveScoresToCloud(scores);
+  }
+
+  async function loadTopScoresCloud(username) {
+    let scores = await getScoresFromCloud();
+    scores.sort((a, b) => b.score - a.score);
+
+    const top = scores.slice(0, 3);
+    const current = scores.find(s => s.username === username) || { score: 0 };
+
+    let html = "<strong>Global High Scores:</strong><br/>";
+    top.forEach((s, i) => {
+      html += `${i + 1}. ${s.username}: ${s.score}<br/>`;
+    });
+
+    html += `<br/><strong>Your High Score:</strong><br/>${username}: ${current.score}`;
+    scoreboard.innerHTML = html;
+  }
 
     function saveScore(username, score) {
     let scores = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
@@ -192,11 +245,16 @@
       player.matrix = nextPiece.matrix;
       const pieces = 'TJLOSZI';
       nextPiece.matrix = createPiece(pieces[Math.floor(Math.random() * pieces.length)]);
+      totalPiecesDropped++;
       player.pos.y = 0;
       player.pos.x = Math.floor(arena[0].length / 2) - Math.floor(player.matrix[0].length / 2);
       if (collide(arena, player)) {
-        saveScore(username, player.score);
-        loadTopScores(username);
+        if (isScorePlausible(player.score)) {
+          saveScoreCloud(username, player.score);
+        } else {
+          console.warn("Score rejected: impossible value detected!")
+        }
+        loadTopScoresCloud(username);
         arena.forEach(row => row.fill(0));
         player.score = 0;
       }
@@ -273,6 +331,7 @@
     }
 
     function arenaSweep() {
+      let linesCleared = 0;
       outer: for (let y = arena.length - 1; y >= 0; --y) {
         for (let x = 0; x < arena[y].length; ++x) {
           if (arena[y][x] === 0) continue outer;
@@ -280,8 +339,17 @@
         const row = arena.splice(y, 1)[0].fill(0);
         arena.unshift(row);
         ++y;
-        player.score += 10;
+        player.score += 10;       // keep existing scoring
+        linesCleared++;
       }
+      totalLinesCleared += linesCleared;
+    }
+
+    function isScorePlausible(score) {
+      // Max score per line = 10 points
+      // Max possible lines = totalPiecesDropped * 4 (max 4 rows per piece)
+      const maxPossibleScore = totalPiecesDropped * 4 * 10;
+      return score <= maxPossibleScore;
     }
 
     function updateScore() {
@@ -338,7 +406,7 @@
 
     nextPiece.matrix = createPiece('TJLOSZI'[Math.floor(Math.random() * 7)]);
     playerReset();
-    loadTopScores(username);
+    loadTopScoresCloud(username);
     update();
   </script>
 
